@@ -1,49 +1,116 @@
+import argparse
 import random
-import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import numpy as np
 import torch
-import torch.optim as optim
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
+from torch import Tensor, optim
+from torch.utils.tensorboard.writer import SummaryWriter
+
+from ntm.controller import FeedForwardController, LSTMController
 from ntm.ntm import NTM
 from ntm.utils import plot_copy_results
-import numpy as np
-import argparse
-from torch.utils.tensorboard import SummaryWriter
-from datetime import datetime
 
 parser = argparse.ArgumentParser(description="Process some integers.")
 parser.add_argument("--train", help="Trains the model", action="store_true")
 parser.add_argument("--ff", help="Feed forward controller", action="store_true")
-parser.add_argument("--eval", help="Evaluates the model. Default path is models/copy.pt", action="store_true")
-parser.add_argument("--modelpath", help="Specify the model path to load, for training or evaluation", type=str)
-parser.add_argument("--epochs", help="Specify the number of epochs for training", type=int, default=50_000)
+parser.add_argument(
+    "--eval",
+    help="Evaluates the model. Default path is models/copy.pt",
+    action="store_true",
+)
+parser.add_argument(
+    "--modelpath",
+    help="Specify the model path to load, for training or evaluation",
+    type=str,
+)
+parser.add_argument(
+    "--epochs",
+    help="Specify the number of epochs for training",
+    type=int,
+    default=50_000,
+)
 args = parser.parse_args()
 
 seed = 1
 random.seed(seed)
-np.random.seed(seed)
+# rng = np.random.RandomState(seed)
+# np.random.seed(seed)
+rng = np.random.default_rng(seed)
 torch.manual_seed(seed)
 
 
-def get_training_sequence(sequence_min_length, sequence_max_length, vector_length, batch_size=1):
-    sequence_length = random.randint(sequence_min_length, sequence_max_length)
-    output = torch.bernoulli(torch.Tensor(sequence_length, batch_size, vector_length).uniform_(0, 1))
-    input = torch.zeros(sequence_length + 1, batch_size, vector_length + 1)
-    input[:sequence_length, :, :vector_length] = output
-    input[sequence_length, :, vector_length] = 1.0
-    return input, output
+def get_training_sequence(
+    sequence_min_length: int,
+    sequence_max_length: int,
+    vector_length: int,
+    batch_size: int = 1,
+) -> tuple[Tensor, Tensor]:
+    """Generate a training sequence for the copy task.
+
+    Args:
+        sequence_min_length: Minimum length of the sequence.
+        sequence_max_length: Maximum length of the sequence.
+        vector_length: Length of each vector in the sequence.
+        batch_size: Number of sequences to generate in parallel.
+
+    Returns:
+        A tuple containing:
+            - input_seq: The input sequence with an end marker (shape: [sequence_length+1, batch_size, vector_length+1])
+            - output: The target output sequence (shape: [sequence_length, batch_size, vector_length])
+
+    """
+    sequence_length = rng.integers(
+        sequence_min_length,
+        sequence_max_length,
+        endpoint=True,
+    )
+    output = torch.bernoulli(
+        torch.Tensor(sequence_length, batch_size, vector_length).uniform_(
+            0,
+            1,
+        ),
+    )
+    input_seq = torch.zeros(sequence_length + 1, batch_size, vector_length + 1)
+    input_seq[:sequence_length, :, :vector_length] = output
+    input_seq[sequence_length, :, vector_length] = 1.0
+    return input_seq, output
 
 
-def train(epochs=50_000):
-    tensorboard_log_folder = f"runs/copy-task-{datetime.now().strftime('%Y-%m-%dT%H%M%S')}"
+def train(epochs: int = 50_000) -> None:
+    """Train the Neural Turing Machine (NTM) model on the copy task.
+
+    The function handles the entire training process including:
+    - Setting up TensorBoard logging
+    - Initializing model parameters
+    - Creating and configuring the NTM model
+    - Running the training loop
+    - Calculating and logging loss and cost metrics
+    - Saving the trained model
+
+    Args:
+        epochs: Number of training epochs to run. Defaults to 50,000.
+
+    Returns:
+        None. The trained model is saved to disk at the specified path.
+
+    """
+    # Eastern Standard Time
+    # tzz = timezone(timedelta(hours=-5)).strftime("%Y-%m-%dT%H%M%S")
+    tensorboard_log_folder = f"runs/copy-task-{datetime.now()}"  # .astimezone(tzz)}"
     writer = SummaryWriter(tensorboard_log_folder)
     print(f"Training for {epochs} epochs, logging in {tensorboard_log_folder}")
     sequence_min_length = 1
     sequence_max_length = 20
     vector_length = 8
-    memory_size = (128, 20)
+    memory_size = (128, 20)  # N, W (#locations x width per loc)
     hidden_layer_size = 100
     batch_size = 4
     lstm_controller = not args.ff
+    memory_locations = memory_size[0]
+    memory_vector_size = memory_size[1]
 
     writer.add_scalar("sequence_min_length", sequence_min_length)
     writer.add_scalar("sequence_max_length", sequence_max_length)
@@ -55,24 +122,41 @@ def train(epochs=50_000):
     writer.add_scalar("seed", seed)
     writer.add_scalar("batch_size", batch_size)
 
-    model = NTM(vector_length, hidden_layer_size, memory_size, lstm_controller)
+    # Initialize the controller based on the lstm_controller flag
+    if lstm_controller:
+        controller = LSTMController(
+            vector_length + 1,
+            hidden_layer_size,
+            memory_vector_length=memory_vector_size,
+        )
+    else:
+        controller = FeedForwardController(vector_length, hidden_layer_size, memory_vector_size)
+
+    # Pass the controller instance to NTM
+    model = NTM(vector_length, hidden_layer_size, memory_size, controller)
 
     optimizer = optim.RMSprop(model.parameters(), momentum=0.9, alpha=0.95, lr=1e-4)
     feedback_frequency = 100
     total_loss = []
     total_cost = []
 
-    os.makedirs("models", exist_ok=True)
-    if os.path.isfile(model_path):
-        print(f"Loading model from {model_path}")
-        checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-        model.load_state_dict(checkpoint)
+    Path("models").mkdir(exist_ok=True)
+    model_path = "models/copy.pt"
+    # if Path(model_path).exists():
+    #     print(f"Loading model from {model_path}")
+    #     checkpoint = torch.load(model_path, map_location=torch.device("mps"))  # cpu
+    #     model.load_state_dict(checkpoint)
 
     for epoch in range(epochs + 1):
         optimizer.zero_grad()
-        input, target = get_training_sequence(sequence_min_length, sequence_max_length, vector_length, batch_size)
+        input_seq, target = get_training_sequence(
+            sequence_min_length,
+            sequence_max_length,
+            vector_length,
+            batch_size,
+        )
         state = model.get_initial_state(batch_size)
-        for vector in input:
+        for vector in input_seq:
             _, state = model(vector, state)
         y_out = torch.zeros(target.size())
         for j in range(len(target)):
@@ -89,33 +173,55 @@ def train(epochs=50_000):
             running_loss = sum(total_loss) / len(total_loss)
             running_cost = sum(total_cost) / len(total_cost)
             print(f"Loss at step {epoch}: {running_loss}")
-            writer.add_scalar('training loss', running_loss, epoch)
-            writer.add_scalar('training cost', running_cost, epoch)
+            writer.add_scalar("training loss", running_loss, epoch)
+            writer.add_scalar("training cost", running_cost, epoch)
             total_loss = []
             total_cost = []
 
-    torch.save(model.state_dict(), model_path)
+    # torch.save(model.state_dict(), model_path)
+    # Add these lines at the end of the `train` function in copy_task.py, after the training loop:
+    model_path_original_lstm = "models/original_lstm_model_1000steps.pt"
+    torch.save(model.state_dict(), model_path_original_lstm)
+    print(f"Saved original LSTM model weights to: {model_path_original_lstm}")
 
 
-def eval(model_path):
+def eval_model(model_path: str) -> None:
+    """Evaluate a trained Neural Turing Machine model on the copy task.
+
+    Loads a pre-trained model from the specified path and evaluates its performance
+    on sequences of different lengths. Plots the results of the copy task.
+
+    Args:
+        model_path: Path to the saved model checkpoint file.
+
+    Returns:
+        None
+
+    """
     vector_length = 8
     memory_size = (128, 20)
     hidden_layer_size = 100
     lstm_controller = not args.ff
+    memory_locations = memory_size[0]
+    memory_vector_size = memory_size[1]
 
     model = NTM(vector_length, hidden_layer_size, memory_size, lstm_controller)
 
     print(f"Loading model from {model_path}")
-    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+    checkpoint = torch.load(model_path, map_location=torch.device("mps"))  # cpu
     model.load_state_dict(checkpoint)
     model.eval()
 
     lengths = [20, 100]
-    for l in lengths:
-        sequence_length = l
-        input, target = get_training_sequence(sequence_length, sequence_length, vector_length)
+    for el in lengths:
+        sequence_length = el
+        input_seq, target = get_training_sequence(
+            sequence_length,
+            sequence_length,
+            vector_length,
+        )
         state = model.get_initial_state()
-        for vector in input:
+        for vector in input_seq:
             _, state = model(vector, state)
         y_out = torch.zeros(target.size())
         for j in range(len(target)):
@@ -131,6 +237,8 @@ if __name__ == "__main__":
     if args.modelpath:
         model_path = args.modelpath
     if args.train:
+        print("train")
         train(args.epochs)
     if args.eval:
-        eval(model_path)
+        print("eval")
+        eval_model(model_path)
