@@ -54,7 +54,7 @@ class Memory(nn.Module):
 
     def reset_parameters(self) -> None:
         # Initialize memory with random values (batch_size=1)
-        self.register_buffer("_initial_memory", torch.randn(1, self.N, self.W) * 0.05)
+        self.register_buffer("_initial_memory", torch.randn(1, self.N, self.W) * 0.01)
 
     def get_size(self) -> tuple[int, int]:
         return self.N, self.W

@@ -142,7 +142,7 @@ class LSTMController(Controller):
         self.lstm_h_state = Parameter(torch.randn(1, 1, hidden_size) * 0.05)
         self.lstm_c_state = Parameter(torch.randn(1, 1, hidden_size) * 0.05)
         self._initialize_parameters()
-        print(f"init LSTM, {vector_length=}, {hidden_size=}")
+        # print(f"init LSTM, {vector_length=}, {hidden_size=}")
 
         # TEMPORARY DEFINITIONS to avoid AttributeError for initial run
         # self.layer_1 = nn.Linear(1, 1)  # Dummy linear layer
@@ -162,10 +162,10 @@ class LSTMController(Controller):
         Returns:
             Tuple of output tensor and new state.
         """
-        print(f"LSTMController.forward input x shape: {x.shape}")  # 4, 29
+        # print(f"LSTMController.forward input x shape: {x.shape}")  # 4, 29
         output, state = self.layer(x.unsqueeze(0), state)
-        print(f"LSTM Output shape: {output.shape}")
-        print("LSTM Output (first batch element):\n", output[0].detach().cpu().numpy())
+        # print(f"LSTM Output shape: {output.shape}")
+        # print("LSTM Output (first batch element):\n", output[0].detach().cpu().numpy())
         return output.squeeze(0), state
 
     def get_initial_state(self, batch_size: int) -> tuple[Tensor, Tensor]:

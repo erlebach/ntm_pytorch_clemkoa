@@ -36,9 +36,10 @@ args = parser.parse_args()
 
 seed = 1
 random.seed(seed)
-# rng = np.random.RandomState(seed)
-# np.random.seed(seed)
-rng = np.random.default_rng(seed)
+
+np.random.seed(seed)
+# rng = np.random.default_rng(seed)
+
 torch.manual_seed(seed)
 
 
@@ -62,11 +63,13 @@ def get_training_sequence(
             - output: The target output sequence (shape: [sequence_length, batch_size, vector_length])
 
     """
-    sequence_length = rng.integers(
-        sequence_min_length,
-        sequence_max_length,
-        endpoint=True,
-    )
+    #sequence_length = rng.integers(
+        #sequence_min_length,
+        #sequence_max_length,
+        #endpoint=True,
+    #)
+    sequence_length = random.randint(sequence_min_length, sequence_max_length)
+
     output = torch.bernoulli(
         torch.Tensor(sequence_length, batch_size, vector_length).uniform_(
             0,
@@ -124,7 +127,7 @@ def train(epochs: int = 50_000) -> None:
 
     # Initialize the controller based on the lstm_controller flag
     if lstm_controller:
-        print(f"lstm_controller, {vector_length=}, {hidden_layer_size=}")
+        # print(f"lstm_controller, {vector_length=}, {hidden_layer_size=}")
         controller = LSTMController(
             vector_length + 1 + memory_size[1],
             hidden_layer_size,
@@ -163,9 +166,9 @@ def train(epochs: int = 50_000) -> None:
             y_out[j], state = model(torch.zeros(batch_size, vector_length + 1), state)
         loss = F.binary_cross_entropy(y_out, target)
 
-        print("Target (first batch element):\n", target[0].detach().cpu().numpy())
-        print("Output (first batch element):\n", y_out[0].detach().cpu().numpy())
-        print("Loss value:", loss.item())
+        # print("Target (first batch element):\n", target[0].detach().cpu().numpy())
+        # print("Output (first batch element):\n", y_out[0].detach().cpu().numpy())
+        # print("Loss value:", loss.item())
 
         loss.backward()
         optimizer.step()
