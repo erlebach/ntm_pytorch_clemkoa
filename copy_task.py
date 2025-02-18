@@ -109,8 +109,8 @@ def train(epochs: int = 50_000) -> None:
     hidden_layer_size = 100
     batch_size = 4
     lstm_controller = not args.ff
-    memory_locations = memory_size[0]
-    memory_vector_size = memory_size[1]
+    # memory_locations = memory_size[0]
+    # memory_vector_size = memory_size[1]
 
     writer.add_scalar("sequence_min_length", sequence_min_length)
     writer.add_scalar("sequence_max_length", sequence_max_length)
@@ -124,13 +124,13 @@ def train(epochs: int = 50_000) -> None:
 
     # Initialize the controller based on the lstm_controller flag
     if lstm_controller:
+        print(f"lstm_controller, {vector_length=}, {hidden_layer_size=}")
         controller = LSTMController(
-            vector_length + 1,
+            vector_length + 1 + memory_size[1],
             hidden_layer_size,
-            memory_vector_length=memory_vector_size,
         )
     else:
-        controller = FeedForwardController(vector_length, hidden_layer_size, memory_vector_size)
+        controller = FeedForwardController(vector_length+1+memory_size[1], hidden_layer_size)
 
     # Pass the controller instance to NTM
     model = NTM(vector_length, hidden_layer_size, memory_size, controller)
@@ -162,6 +162,11 @@ def train(epochs: int = 50_000) -> None:
         for j in range(len(target)):
             y_out[j], state = model(torch.zeros(batch_size, vector_length + 1), state)
         loss = F.binary_cross_entropy(y_out, target)
+
+        print("Target (first batch element):\n", target[0].detach().cpu().numpy())
+        print("Output (first batch element):\n", y_out[0].detach().cpu().numpy())
+        print("Loss value:", loss.item())
+
         loss.backward()
         optimizer.step()
         total_loss.append(loss.item())
@@ -172,9 +177,9 @@ def train(epochs: int = 50_000) -> None:
         if epoch % feedback_frequency == 0:
             running_loss = sum(total_loss) / len(total_loss)
             running_cost = sum(total_cost) / len(total_cost)
-            print(f"Loss at step {epoch}: {running_loss}")
-            writer.add_scalar("training loss", running_loss, epoch)
-            writer.add_scalar("training cost", running_cost, epoch)
+            print(f"Batch: {epoch}, Loss: {running_loss:.6f}")
+            with open("original_lstm_loss_1000steps.txt", "a") as f:
+                f.write(f"Batch: {epoch}, Loss: {running_loss:.6f}\n")
             total_loss = []
             total_cost = []
 

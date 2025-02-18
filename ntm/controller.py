@@ -122,7 +122,7 @@ class Controller(nn.Module, ABC):
 class LSTMController(Controller):
     """LSTM-based controller implementation."""
 
-    def __init__(self, vector_length: int, hidden_size: int, memory_vector_length: int = None):
+    def __init__(self, vector_length: int, hidden_size: int):
         """Initialize the LSTM controller.
 
         Args:
@@ -132,16 +132,23 @@ class LSTMController(Controller):
         """
         super().__init__(vector_length, hidden_size)
         # Use memory_vector_length if specified, otherwise use vector_length
-        self.memory_vector_length = memory_vector_length or vector_length
+        # self.memory_vector_length = memory_vector_length or vector_length
 
         # Input consists of:
         # - Original input (vector_length)
         # - Memory read (memory_vector_length)
-        total_input_size = vector_length + self.memory_vector_length
-        self.layer = nn.LSTM(input_size=total_input_size, hidden_size=hidden_size)
+        # total_input_size = vector_length + self.memory_vector_length
+        self.layer = nn.LSTM(input_size=vector_length, hidden_size=hidden_size)
         self.lstm_h_state = Parameter(torch.randn(1, 1, hidden_size) * 0.05)
         self.lstm_c_state = Parameter(torch.randn(1, 1, hidden_size) * 0.05)
         self._initialize_parameters()
+        print(f"init LSTM, {vector_length=}, {hidden_size=}")
+
+        # TEMPORARY DEFINITIONS to avoid AttributeError for initial run
+        # self.layer_1 = nn.Linear(1, 1)  # Dummy linear layer
+        # self.layer_2 = nn.Linear(1, 1)  # Dummy linear layer
+        # self.layer_3 = nn.Linear(1, 1)  # Dummy linear layer
+        # These layers are just defined to prevent AttributeError, their outputs are not used meaningfully in this test.
 
     def forward(
         self, x: Tensor, state: tuple[Tensor, Tensor]
@@ -155,10 +162,11 @@ class LSTMController(Controller):
         Returns:
             Tuple of output tensor and new state.
         """
-        # print(f"LSTMController.forward input x shape: {x.shape}")
+        print(f"LSTMController.forward input x shape: {x.shape}")  # 4, 29
         output, state = self.layer(x.unsqueeze(0), state)
-        output = output.squeeze(0)
-        return output, state
+        print(f"LSTM Output shape: {output.shape}")
+        print("LSTM Output (first batch element):\n", output[0].detach().cpu().numpy())
+        return output.squeeze(0), state
 
     def get_initial_state(self, batch_size: int) -> tuple[Tensor, Tensor]:
         """Get initial state for the LSTM controller.
@@ -177,7 +185,7 @@ class LSTMController(Controller):
 class FeedForwardController(Controller):
     """Feed-forward controller implementation."""
 
-    def __init__(self, vector_length: int, hidden_size: int, memory_vector_size: int) -> None:
+    def __init__(self, vector_length: int, hidden_size: int) -> None:
         """Initialize the feed-forward controller.
 
         Args:
@@ -186,7 +194,7 @@ class FeedForwardController(Controller):
             memory_vector_size: Size of memory vectors.
         """
         super().__init__(vector_length, hidden_size)
-        self.layer_1 = nn.Linear(vector_length + memory_vector_size + 1, hidden_size)
+        self.layer_1 = nn.Linear(vector_length, hidden_size)
         self.layer_2 = nn.Linear(hidden_size, hidden_size)
         self._initialize_parameters()
 
